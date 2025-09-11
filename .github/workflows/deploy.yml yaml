@@ -1,0 +1,43 @@
+name: Deploy Flask App to Azure App Service
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PYTHON_VERSION: '3.11'
+  APP_NAME: iotocturion         # Replace with your App Service name
+  ZIP_NAME: app.zip
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Zip application
+      run: |
+        zip -r ${{ env.ZIP_NAME }} . -x "*.git*" "__pycache__/*" "*.venv/*"
+
+    - name: List ZIP contents (debug)
+      run: unzip -l ${{ env.ZIP_NAME }}
+
+    - name: Deploy to Azure App Service
+      uses: azure/webapps-deploy@v2
+      with:
+        app-name: ${{ env.APP_NAME }}
+        package: ${{ env.ZIP_NAME }}
+        publish-profile: ${{ secrets.AZURE_PUBLISH_PROFILE }}
