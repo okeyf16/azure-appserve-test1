@@ -1,4 +1,4 @@
-name: Deploy Flask App to Azure App Service
+name: Deploy Flask App to Azure App Service 
 
 on:
   push:
