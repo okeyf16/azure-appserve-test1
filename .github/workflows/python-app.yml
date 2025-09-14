@@ -7,7 +7,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.11'
-  APP_NAME: iotocturion-c9a8fwd6dmgtckbt.northeurope-01.azurewebsites.net         # Replace with your App Service name
+  APP_NAME: iotocturion         # Replace with your App Service name
   ZIP_NAME: app.zip
 
 jobs:
