@@ -3,5 +3,4 @@ azure-data-tables
 python-dotenv
 gunicorn==23.0.0
 azure-identity==1.15.0
-gunicorn
 azure-monitor-opentelemetry
