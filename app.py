@@ -1,5 +1,6 @@
 import os
 import uuid
+import logging 
 from flask import Flask, request, jsonify
 from azure.data.tables import TableServiceClient
 from dotenv import load_dotenv
@@ -36,10 +37,25 @@ def create_entity():
 # Read entities (optionally filter by deviceId)
 @app.route("/telemetry", methods=["GET"])
 def read_entities():
-    device_id = request.args.get("deviceId")
-    filter_query = f"PartitionKey eq '{device_id}'" if device_id else None
-    entities = table_client.query_entities(filter=filter_query) if filter_query else table_client.list_entities()
-    return jsonify([e for e in entities]), 200
+    try:
+        device_id = request.args.get("deviceId")
+        
+        if device_id:
+            # This is the part that is likely failing
+            filter_query = f"PartitionKey eq '{device_id}'"
+            logging.info(f"Querying with filter: {filter_query}")
+            entities = table_client.query_entities(query_filter=filter_query)
+        else:
+            logging.info("Querying all entities.")
+            entities = table_client.list_entities()
+            
+        return jsonify([e for e in entities]), 200
+
+    except Exception as e:
+        # This will catch the crash and log the exact error
+        logging.error(f"An error occurred while querying entities: {e}")
+        # Return a useful error message instead of crashing
+        return jsonify({"error": "Failed to query data from Azure.", "details": str(e)}), 500
 
 # Update entity
 @app.route("/telemetry/<row_key>", methods=["PUT"])
