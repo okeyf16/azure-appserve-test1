@@ -4,3 +4,4 @@ python-dotenv
 gunicorn==23.0.0
 azure-identity==1.15.0
 azure-monitor-opentelemetry
+azure-core==1.30.2
