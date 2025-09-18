@@ -183,7 +183,12 @@ if ai_conn:
     try:
         ai_handler = AzureLogHandler(connection_string=ai_conn)
         ai_handler.setLevel(logging.INFO)
+
+        # Attach to your module logger
         logger.addHandler(ai_handler)
+        # Attach to root logger so all logs flow to AI
+        logging.getLogger().addHandler(ai_handler)
+
         logger.info("Application Insights logging enabled")
     except Exception as e:
         logger.warning("Failed to attach AI handler: %s", e)
