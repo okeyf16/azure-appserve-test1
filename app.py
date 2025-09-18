@@ -1,112 +1,183 @@
 import os
 import uuid
 import logging
-from flask import Flask, request, jsonify
-from azure.data.tables import TableServiceClient
-from azure.core.exceptions import AzureError  # generic Azure SDK error
-from dotenv import load_dotenv
+from typing import Optional
 
-# Load environment variables for local dev
-load_dotenv()
+from flask import Flask, request, jsonify
+
+# External deps imported inside functions when needed to avoid import-time crashes
+# from azure.data.tables import TableServiceClient
+# from azure.core.exceptions import AzureError
 
 app = Flask(__name__)
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("telemetry_api")
 
-# Load config
+# Config (read env, but do not connect yet)
 API_KEY = os.getenv("API_KEY")
-TABLE_NAME = "TelemetryData"
-conn_str = os.getenv("STORAGE_CONN_STR")
+TABLE_NAME = os.getenv("TABLE_NAME", "TelemetryData")
+STORAGE_CONN_STR = os.getenv("STORAGE_CONN_STR")
 
-# Create table client
-table_client = TableServiceClient.from_connection_string(conn_str).get_table_client(TABLE_NAME)
+# Lazy singletons
+_table_client = None
+_sdk_loaded = None  # tri-state: None unknown, True loaded, False not installed
 
-# Middleware for API key auth
+
+def load_sdk():
+    global _sdk_loaded, TableServiceClient, AzureError
+    if _sdk_loaded is not None:
+        return _sdk_loaded
+    try:
+        from azure.data.tables import TableServiceClient  # type: ignore
+        from azure.core.exceptions import AzureError  # type: ignore
+        globals()["TableServiceClient"] = TableServiceClient
+        globals()["AzureError"] = AzureError
+        _sdk_loaded = True
+        logger.info("Azure SDK loaded")
+    except Exception as e:
+        _sdk_loaded = False
+        logger.error("Azure SDK not available: %s", e)
+    return _sdk_loaded
+
+
+def get_table_client():
+    global _table_client
+    if _table_client is not None:
+        return _table_client
+
+    if not load_sdk():
+        return None
+
+    if not STORAGE_CONN_STR:
+        logger.error("STORAGE_CONN_STR not set")
+        return None
+
+    try:
+        svc = TableServiceClient.from_connection_string(STORAGE_CONN_STR)  # type: ignore
+        _table_client = svc.get_table_client(TABLE_NAME)  # type: ignore
+        logger.info("Connected to Table Storage table '%s'", TABLE_NAME)
+        return _table_client
+    except Exception as e:
+        logger.error("Failed to create Table client: %s", e)
+        return None
+
+
 @app.before_request
 def check_api_key():
+    # Allow health and root without key
+    if request.path in ("/", "/healthz"):
+        return None
     key = request.headers.get("x-api-key")
-    if key != API_KEY:
-        logging.warning("Unauthorized request")
+    if not API_KEY or key != API_KEY:
+        logger.warning("Unauthorized request to %s from %s", request.path, request.remote_addr)
         return jsonify({"error": "Unauthorized"}), 401
+    return None
 
-# Create new entity
+
+@app.route("/", methods=["GET"])
+def root():
+    return jsonify({
+        "name": "IoT Telemetry API",
+        "endpoints": ["/healthz", "/telemetry"],
+        "table": TABLE_NAME
+    }), 200
+
+
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    tc = get_table_client()
+    return jsonify({
+        "ok": bool(tc and API_KEY),
+        "details": {
+            "sdk_loaded": bool(_sdk_loaded),
+            "api_key_set": bool(API_KEY),
+            "storage_conn_str_set": bool(STORAGE_CONN_STR),
+            "table_client_ready": bool(tc)
+        }
+    }), 200 if (tc and API_KEY) else 500
+
+
 @app.route("/telemetry", methods=["POST"])
 def create_entity():
+    tc = get_table_client()
+    if tc is None:
+        return jsonify({"error": "Storage not configured or SDK missing"}), 500
     try:
-        data = request.json
+        data = request.get_json(force=True) or {}
+        partition = data.get("deviceId", "unknown")
         entity = {
-            "PartitionKey": data.get("deviceId", "unknown"),
+            "PartitionKey": partition,
             "RowKey": str(uuid.uuid4()),
             **data
         }
-        table_client.create_entity(entity)
-        logging.info(f"Created entity for {entity['PartitionKey']}")
+        tc.create_entity(entity)
+        logger.info("Created entity for device %s", partition)
         return jsonify({"status": "created", "entity": entity}), 201
-    except AzureError as e:
-        logging.error(f"Azure error creating entity: {e}")
-        return jsonify({"error": "Azure error", "details": str(e)}), 500
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return jsonify({"error": "Unexpected error", "details": str(e)}), 500
+        logger.error("Create failed: %s", e)
+        return jsonify({"error": "Failed to create entity", "details": str(e)}), 500
 
-# Read entities
+
 @app.route("/telemetry", methods=["GET"])
 def read_entities():
+    tc = get_table_client()
+    if tc is None:
+        return jsonify({"error": "Storage not configured or SDK missing"}), 500
     try:
         device_id = request.args.get("deviceId")
         if device_id:
             filter_query = f"PartitionKey eq '{device_id}'"
-            logging.info(f"Querying with filter: {filter_query}")
-            entities = table_client.query_entities(query_filter=filter_query)
+            logger.info("Query filter: %s", filter_query)
+            # azure.data.tables uses 'query_filter' kw name
+            entities_iter = tc.query_entities(query_filter=filter_query)
         else:
-            logging.info("Querying all entities")
-            entities = table_client.list_entities()
+            logger.info("Querying all entities")
+            entities_iter = tc.list_entities()
 
-        return jsonify([e for e in entities]), 200
-    except AzureError as e:
-        logging.error(f"Azure error reading entities: {e}")
-        return jsonify({"error": "Azure error", "details": str(e)}), 500
+        # Materialize to list (consider server-side paging later)
+        entities = [e for e in entities_iter]
+        return jsonify(entities), 200
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return jsonify({"error": "Unexpected error", "details": str(e)}), 500
+        logger.error("Read failed: %s", e)
+        return jsonify({"error": "Failed to query data from Azure", "details": str(e)}), 500
 
-# Update entity
+
 @app.route("/telemetry/<row_key>", methods=["PUT"])
 def update_entity(row_key):
+    tc = get_table_client()
+    if tc is None:
+        return jsonify({"error": "Storage not configured or SDK missing"}), 500
     try:
-        data = request.json
+        data = request.get_json(force=True) or {}
         partition_key = data.get("deviceId", "unknown")
         entity = {
             "PartitionKey": partition_key,
             "RowKey": row_key,
             **data
         }
-        table_client.update_entity(entity, mode="MERGE")
-        logging.info(f"Updated entity {row_key} for {partition_key}")
+        tc.update_entity(entity, mode="MERGE")
+        logger.info("Updated entity %s for %s", row_key, partition_key)
         return jsonify({"status": "updated", "entity": entity}), 200
-    except AzureError as e:
-        logging.error(f"Azure error updating entity: {e}")
-        return jsonify({"error": "Azure error", "details": str(e)}), 500
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return jsonify({"error": "Unexpected error", "details": str(e)}), 500
+        logger.error("Update failed: %s", e)
+        return jsonify({"error": "Failed to update entity", "details": str(e)}), 500
 
-# Delete entity
+
 @app.route("/telemetry/<row_key>", methods=["DELETE"])
 def delete_entity(row_key):
+    tc = get_table_client()
+    if tc is None:
+        return jsonify({"error": "Storage not configured or SDK missing"}), 500
     try:
         partition_key = request.args.get("deviceId", "unknown")
-        table_client.delete_entity(partition_key, row_key)
-        logging.info(f"Deleted entity {row_key} for {partition_key}")
+        tc.delete_entity(partition_key, row_key)
+        logger.info("Deleted entity %s for %s", row_key, partition_key)
         return jsonify({"status": "deleted"}), 200
-    except AzureError as e:
-        logging.error(f"Azure error deleting entity: {e}")
-        return jsonify({"error": "Azure error", "details": str(e)}), 500
     except Exception as e:
-        logging.error(f"Unexpected error: {e}")
-        return jsonify({"error": "Unexpected error", "details": str(e)}), 500
+        logger.error("Delete failed: %s", e)
+        return jsonify({"error": "Failed to delete entity", "details": str(e)}), 500
 
-# Local dev entrypoint
+
+# Local dev only; in Azure, Oryx runs gunicorn app:app
 if __name__ == "__main__":
     app.run(debug=True)
