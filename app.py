@@ -2,8 +2,8 @@ import os
 import uuid
 import logging
 from typing import Optional
-
 from flask import Flask, request, jsonify
+from opencensus.ext.azure.log_exporter import AzureLogHandler # New app insights addition #
 
 # External deps imported inside functions when needed to avoid import-time crashes
 # from azure.data.tables import TableServiceClient
@@ -177,7 +177,18 @@ def delete_entity(row_key):
         logger.error("Delete failed: %s", e)
         return jsonify({"error": "Failed to delete entity", "details": str(e)}), 500
 
+# New app insights addition #
+ai_conn = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+if ai_conn:
+    try:
+        ai_handler = AzureLogHandler(connection_string=ai_conn)
+        ai_handler.setLevel(logging.INFO)
+        logger.addHandler(ai_handler)
+        logger.info("Application Insights logging enabled")
+    except Exception as e:
+        logger.warning("Failed to attach AI handler: %s", e)
 
 # Local dev only; in Azure, Oryx runs gunicorn app:app
+
 if __name__ == "__main__":
     app.run(debug=True)
