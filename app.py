@@ -104,4 +104,4 @@ def delete_entity(row_key):
 # Run the app
 if __name__ == "__main__":
     logger.info("Starting Flask app")
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=8000)
