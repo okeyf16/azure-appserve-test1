@@ -4,8 +4,6 @@ import logging
 from flask import Flask, request, jsonify
 from azure.data.tables import TableServiceClient
 from dotenv import load_dotenv
-from opencensus.ext.azure.log_exporter import AzureLogHandler
-
 
 load_dotenv()  # Only for local dev
 
