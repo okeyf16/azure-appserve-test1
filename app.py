@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 from opencensus.ext.azure.log_exporter import AzureLogHandler
 
 
-
 load_dotenv()  # Only for local dev
 
 app = Flask(__name__)
@@ -80,12 +79,6 @@ def delete_entity(row_key):
     table_client.delete_entity(partition_key, row_key)
     return jsonify({"status": "deleted"}), 200
 
-# Setup logging
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-logger.addHandler(AzureLogHandler(
-    connection_string="InstrumentationKey=0742ab5e-d871-4d1a-950b-e3cd97cbe12f;IngestionEndpoint=https://northeurope-2.in.applicationinsights.azure.com/;LiveEndpoint=https://northeurope.livediagnostics.monitor.azure.com/;ApplicationId=9e8d271e-5494-439d-bfd2-3e9741fe2b5c"
-))
 
 if __name__ == "__main__":
     app.run(debug=True)
