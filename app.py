@@ -4,6 +4,12 @@ import logging
 from flask import Flask, request, jsonify
 from azure.data.tables import TableServiceClient
 from dotenv import load_dotenv
+from opencensus.ext.azure.log_exporter import AzureLogHandler
+
+logger = logging.getLogger(__name__)
+logger.addHandler(AzureLogHandler(connection_string="InstrumentationKey=0742ab5e-d871-4d1a-950b-e3cd97cbe12f;IngestionEndpoint=https://northeurope-2.in.applicationinsights.azure.com/;LiveEndpoint=https://northeurope.livediagnostics.monitor.azure.com/;ApplicationId=9e8d271e-5494-439d-bfd2-3e9741fe2b5c"))
+logger.warning("Custom telemetry log: GET /telemetry called")
+
 
 load_dotenv()  # Only for local dev
 
