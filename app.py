@@ -3,8 +3,8 @@ import uuid
 import logging
 from typing import Optional
 from flask import Flask, request, jsonify
-from opencensus.ext.azure.log_exporter import AzureLogHandler # New app insights addition #
 
+# from opencensus.ext.azure.log_exporter import AzureLogHandler # New app insights addition #
 # External deps imported inside functions when needed to avoid import-time crashes
 # from azure.data.tables import TableServiceClient
 # from azure.core.exceptions import AzureError
@@ -12,6 +12,14 @@ from opencensus.ext.azure.log_exporter import AzureLogHandler # New app insights
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("telemetry_api")
+
+# --- Application Insights via OpenTelemetry ---
+from azure.monitor.opentelemetry import configure_azure_monitor
+ai_conn = os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")
+if ai_conn:
+    configure_azure_monitor(connection_string=ai_conn)
+    logger.info("Application Insights (OpenTelemetry) enabled")
+# ----------------------------------------------
 
 # Config (read env, but do not connect yet)
 API_KEY = os.getenv("API_KEY")
